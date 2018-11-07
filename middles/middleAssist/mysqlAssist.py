@@ -72,6 +72,7 @@ class immysql(object):
             dbField = str(tuple(dbField)).replace("'", '')
             cursor = self.get_cursor()
             sql = """insert ignore into %s %s values %s """ % (tbName, dbField, data_values)
+	    print sql
             params = dataTuple
             cursor.execute(sql, params)
             cursor.close()

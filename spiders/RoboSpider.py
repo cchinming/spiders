@@ -13,7 +13,7 @@ from middles.middleAssist import logAsisst
 import jsonpath, requests
 import json, time, random, re
 from middles.middlePool import userAgent
-
+import random
 
 user_data = {
     "username": "18100226031",
@@ -31,6 +31,7 @@ class Robo(iimediaBase):
             'https://gw.datayes.com/rrp_adventure/web/supervisor/macro/%s',
             'https://gw.datayes.com/rrp_adventure/web/dataCenter/indic/%s?compare=false'
         ]
+	self.uname = ('cqy', 'lyy', 'hwl', 'mwj', 'lyh', 'wll', 'luyy', 'tby', 'zx', 'mgb', 'wrx', 'lh', 'wwl')
         self.key = hkey
         self.cookie =Ey.getCookie(self.key)
         self.Logger = logAsisst.imLog(sys.argv[1])()
@@ -97,7 +98,7 @@ class Robo(iimediaBase):
         items = RoboItem()
         try:
             dateValue = jsonpath.jsonpath(response, "$..periodDate")
-            dateValue = map(Ey.fuckAntiNum, dateValue)
+            #dateValue = map(Ey.fuckAntiNum, dateValue)
             #print(jsonpath.jsonpath(response, "$..dataValue"))
             items.data = dict(zip(dateValue,
                                   jsonpath.jsonpath(response, "$..dataValue")))
@@ -134,11 +135,10 @@ class Robo(iimediaBase):
         self.Logger.info([url, "msg %d"%webcode])
         if webcode < 0 and retries < 3:
             if webcode == -403:
-                print(webcode ,"Need login. Wait 5 sec")
+                self.Logger.info([webcode ,"Need login. Wait 5 sec"])
                 time.sleep(5)
+		self.key = random.choice(self.uname)
                 Ey.RoboEasyLogin(self.key)
-                print("Retry Login...%d " % retries)
-                time.sleep(5)
                 self.cookie = Ey.getCookie(self.key)
                 func(retries=retries + 1, code=code)
             else:

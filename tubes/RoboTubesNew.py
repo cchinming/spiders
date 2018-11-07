@@ -7,40 +7,36 @@ currentUrl = os.path.dirname(__file__)
 parentUrl = os.path.abspath(os.path.join(currentUrl, os.pardir))
 sys.path.append(parentUrl)
 from spiders.RoboSpider import Robo
-from middles.middleAssist import mysqlAssist, logAsisst
-from middles.middleAssist import redisAsisst
-from middles.middleWare import  EasyMethod
+from middles.middleAssist import mysqlAssist, logAsisst,ssdbAssist
 from items.iMqIMData import iMqIMDataCollectItem
-
 from BaseTubes import  BaseTubes
 import time
-import threading, multiprocessing
-plock = multiprocessing.Lock()
+import threading
 tlock = threading.Lock()
-
+DEFAULT_NAME_PREFIX = "test_"
 
 class RoboTubes(BaseTubes):
-    def __init__(self, platid=None, taskid=None, objid=None,**kwargs):
+    def __init__(self, platid=None, taskid=None, objid=None,logger=None):
         BaseTubes.__init__(self, platid = platid, taskid= taskid,
                            objid =  objid)
-        self.obj = Robo(hkey=kwargs["hkey"])
+        self.obj = Robo()
         self.sql = mysqlAssist.immysql()
+        self.ssdb= ssdbAssist.SSDBsession()
         self.channelCode = None
-        self.redis = redisAsisst.imredis().connection()
-        self.Logger = logAsisst.imLog(sys.argv[1])()
-        self.feature_code = "seen:code"
+        self.redis = ""
+        self.Logger = logAsisst.imLog(logger)()
+        self.pick_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
 
     def tubes_allchannel(self):
         for i in self.obj.parseChannelItem():
-            if "RRP1" == i["code"]:
+            if "R" in i["code"]:
                 self.channelCode = i["code"]
                 self.sql.insert(tbName="t_ext_data_channel",
                                 channel_name = i["source"],
                                 plat_id = self.plat_id,
                                 channel_code = i["code"])
-		try:
-                    self.tubes_menus(i["code"])
-		except:pass
+
+                self.tubes_menus(i["code"])
 
     def tubes_menus(self, code):
         for i in self.obj.parseItem(code):
@@ -64,18 +60,13 @@ class RoboTubes(BaseTubes):
     def tubes_detail(self, code, **kwargs):
 
         try:
-            self.pick_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
             dataflow = self.obj.parse(code=code, retries=0)
+
+
             data = map(None, dataflow["data"].keys(), dataflow["data"].values())
-           
-       
-            dd = dict(dataflow["ext"], **{'indicId':code})
-	    if self.feature_code.split(":")[-1] != "code":
-		t = self.feature_code.split(":")[-1]
-	    else:t="771263"
+            tlock.acquire()
             self.sql.insert(tbName="t_ext_data_obj",
                             plat_id = self.plat_id,
-			    channel_code = t,
                             name = dataflow["ext"]["name"],
                             code = kwargs["pcode"],
                             frequence_mode = dataflow["frequency"],
@@ -87,88 +78,73 @@ class RoboTubes(BaseTubes):
                             start_time  = dataflow["start_time"],
                             end_time    = dataflow["end_time"],
                             is_end = dataflow["is_end"],
-                            ext = str(dd),
-                            pick_time=self.pick_time)
-	    time.sleep(0.01)
-            p=self.sql.query("select id from t_ext_data_obj "
-                             "where code = '%s' and plat_id=2" % kwargs["pcode"])
-            tt = "insert ignore into t_ext_data_node(obj_id, time_t, amo) " \
-                 "values ( '%s'" % p[0][0]
-            print(tt)
-            self.Logger.info(tt)
-
+                            ext = str(dataflow["ext"]),
+                            pick_time = self.pick_time)
+            tid = self.sql.query("select id from t_ext_data_obj where \
+                           code='%s' and plat_id=%s"%(kwargs["pcode"], self.plat_id))
+            tt = "insert into t_ext_data_node( obj_id, time_t, amo) values (%s" % tid[0][0]
 
             tt = tt + ",%s, %s)"
+            print(tt)
+
+            self.ssdb.setname("s_o_d_i_%d"%tid[0][0])
+            print(self.ssdb.name)
+            map(self.ssdb.Hset, data)
 
 
             self.sql.executemany(tt, tuple(data))
-	    self.Logger.info("set redis %s-%s"%(self.feature_code, code))
-            self.redis.sadd(self.feature_code, code)
-            
+            tlock.release()
         except Exception as e:
-            self.Logger.error(e)
-            
+            print(e)
         else:
             return dataflow["data"]
 
     def tubes_heartbeat(self, offset,feature= None):
-        print("entering heart beat function")
-        if feature is None:
-            tmp = "select code, ext from t_ext_plat_menu\
-                                    where ext <> '' and plat_id = 2  order by id\
-                                     limit %d, 1000" % (offset)
-        else:
-            tmp = "select code, ext from t_ext_plat_menu\
-                                where ext <> '' and plat_id=2 and channel_code='%s'\
-                                 order by id\
-                                 limit %d, 1000" % ( feature,offset )
 
-	print tmp
-	plock.acquire()
-	tlock.acquire()
-	tmplist = self.sql.query(tmp)
-	tlock.release()
-	plock.release()
-        for i in tmplist:
+        if feature is None:
+            tmp = self.sql.query("select code, ext from t_ext_plat_menu\
+                                    where ext like '%%{%%' order by id\
+                                     limit %d, 1000" % (offset))
+        else:
+            tmp = self.sql.query("select code, ext from t_ext_plat_menu\
+                                where ext like '%%{%%' and channel_code='%s' order by id\
+                                 limit %d, 1000" % ( feature, offset))
+
+        for i in tmp:
             yield i
 
     def tmp_crawl(self, feature = None):
-
-        count = feature["offset"]*1000
-        MAX_COUNT = count + 1000
+        count = feature["offset"]*10000
+        MAX_COUNT = count + 10000
         retry = 0
         feature = feature["feature"]
-        if feature != '771263':
-            self.feature_code = "seen:code:{}".format(feature)
         while True:
+
             if count >= MAX_COUNT:
+                print("<>")
                 break
             tmp = self.tubes_heartbeat(count, feature)
-            if not tmp:
+            if tmp is None:
                 retry += 1
                 if retry > 50:
                     break
+
                 self.Logger.info("Waiting Sleep 500 sec")
                 time.sleep(500)
                 continue
             retry = 0
+            print(">>>")
             for i in tmp :
                 print(i)
                 try:
                     pcode = i[0]
                     code  = eval(i[1])["indicId"]
-                    if self.redis.sismember(name=self.feature_code, value=code):
-			self.Logger.info("feature[%s-%s] exist!" % (feature,code))
-                        continue
                     self.tubes_detail(code=code, pcode=pcode)
                 except Exception as e:
                     self.Logger.error(e)
                 else:
-
-                    self.Logger.info(["enter",feature,pcode, code])
                     time.sleep(0.08)
             count += 1000
-
 
     def Tubes(self, taskinfo):
         import datetime
@@ -177,66 +153,42 @@ class RoboTubes(BaseTubes):
             self.plat_id = taskinfo["plat_id"]
             code = eval(taskinfo["obj_ext"])["indicId"]
             dataflow = self.obj.parse(code=code, retries=0)
-            taskinfo['report_time'] = '%s' % \
-                                      datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            taskinfo['report_time'] = '%s' % datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             taskinfo["data"] = dataflow["data"]
             taskinfo['process_code'] = os.getpid()
 
         except Exception as e:
-            self.Logger.error(["TubesError[%d]" % os.getpid(), e])
+            self.Logger.error(["TubesError[%d]"%os.getpid(), e])
 
         else:
             return taskinfo
 
     def __del__(self):
-        self.Logger.info("-----END-----")
+        self.Logger.info("-----[%d] END-----"%os.getpid())
         del self.sql
 
 
 
-def main(feature, count, hkey):
-    print("test....")
-
-    p = RoboTubes(platid=2, hkey=hkey)
-    for i in range(count):
-     	p.tmp_crawl({"feature":feature,"offset":i})
-    s = [gevent.spawn(p.tmp_crawl,
-    {"feature":feature,"offset":i}) for i in range(count*10)]
-    gevent.joinall(gs)
-    #or i in range(count):
-#p.tmp_crawl({'feature':feature,'offset':i})
-    #ts = [threading.Thread(name=i,target=p.tmp_crawl,
-     #                      args=({"feature":feature,"offset":i},))
-     #   for i in range(count)]
-    #for t in ts:
-     #   print(t)
-     #   t.start()
-     #   time.sleep(15)
-    
-  
-    #for t in ts:
-    #    t.join()
+def f(t):
+    import requests
+    for i in range(3):
+        print(requests.get(t), t, i)
+        time.sleep(1)
 
 if __name__ == '__main__':
-    import gevent
-    from gevent import monkey
-    monkey.patch_all()
-    #redisAsisst.initAccount()
-    import random
-    username = ('cqy', 'lyy', 'hwl', 'mwj', 'lyh', 'wll', 'luyy', 'tby', 'zx', 'mgb', 'wrx', 'lh', 'wwl')
-    
-    tmp = {'1138921':8,'402273':17,'771263':51,
-          '632815':23,'RRP1':39,'RRP1349982':13}	
-    ttmp = {'RRP1':39,'RRP1349982':13}
-           
-    # gs = [threading.Thread(target=main, args=(i, tmp[i], u, ))
-    #       for i,u in zip(tmp,username)]
-    gs = [multiprocessing.Process(target=main, args=(i, tmp[i], random.choice(username),))
-          for i in tmp]
 
-    for t in gs:
-        print(t)
-        t.start()
-        time.sleep(5)
-    # for t in gs:
-    #     t.join()
+    #({"feature":"632815","offset":0*10000}
+    from gevent import  monkey
+    import gevent
+    monkey.patch_all()
+    p = RoboTubes(platid=2)
+    # for i in range(1, 23):
+    #     print(0)
+    #     p.tmp_crawl({"feature":"632815","offset":i})
+
+    tt = [gevent.spawn(p.tmp_crawl, {"feature":"632815","offset":i}) for i in range(23)]
+    gevent.joinall(tt)
+
+
+
+

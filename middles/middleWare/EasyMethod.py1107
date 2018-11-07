@@ -69,17 +69,10 @@ def RepeatLogin(url, cookies, user_data):
     return cookiesSmooth(ck)
 
 
-def RoboEasyLogin(key,mode=1):
-    if mode == 0:
-        from middles.middleAssist import redisAsisst
-        Rs = redisAsisst.imredis().connection()
-        userinfo = eval(Rs.hget("robo:accountInfo", key))
-    elif mode == 1:
-        from middles.middleAssist import ssdbAssist
-        Rs = ssdbAssist.SSDBsession().connect()
-        userinfo = eval(Rs.hget("robo:accountInfo", key))
-    else:
-        raise  ValueError("mode is incorrect! it must be 1 or 0")
+def RoboEasyLogin(key):
+    from middles.middleAssist import redisAsisst
+    Rs = redisAsisst.imredis().connection()
+    userinfo = eval(Rs.hget("robo:accountInfo", key))
     user_data = {
     "username": userinfo["account"][0],
     "password": userinfo["account"][1],
@@ -91,35 +84,16 @@ def RoboEasyLogin(key,mode=1):
     ck = cookiesSmooth(ck)
     Rs.hset("tmpaddress:cookie", key, ck)
 
-def getCookie(key, mode=1):
-    if mode == 0:
-        from middles.middleAssist import redisAsisst
-        Rs = redisAsisst.imredis().connection()
-    elif mode == 1:
-        from middles.middleAssist import ssdbAssist
-        Rs = ssdbAssist.SSDBsession().connect()
-    else:
-        raise ValueError("mode is incorrect! it must be 1 or 0")
+def getCookie(key):
+    from middles.middleAssist import redisAsisst
+    Rs = redisAsisst.imredis().connection()
     tt = Rs.hget("tmpaddress:cookie", key)
-    print("getCookie:", tt)
+    #print("getCookie:", tt)
     return tt
 
-
-def insert(tbName, **kwargs):
-    try:
-
-        data_values = "(" + "%s," * (len(kwargs)) + ")"
-        data_values = data_values.replace(',)', ')')
-
-        dbField = kwargs.keys()
-        dataTuple = tuple(kwargs.values())
-        dbField = str(tuple(dbField)).replace("'", '')
-        sql = """insert ignore into %s %s values %s """ % (tbName, dbField, data_values)
-
-        return sql % dataTuple
-    except Exception as e:
-        print e
-        return 0
-
 if __name__ == '__main__':
-    print(insert(tbName="xx",xx=2,dd=34))
+    RoboEasyLogin("zzm")
+    RoboEasyLogin("com")
+    RoboEasyLogin('fwb')
+    RoboEasyLogin('cwf')
+    RoboEasyLogin('llb')
